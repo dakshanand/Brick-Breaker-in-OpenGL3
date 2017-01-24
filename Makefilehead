@@ -1,0 +1,865 @@
+     1	#include <iostream>
+     2	#include <cmath>
+     3	#include <fstream>
+     4	#include <vector>
+     5	#include <stdio.h>      /* printf, scanf, puts, NULL */
+     6	#include <stdlib.h>     /* srand, rand */
+     7	#include <time.h>       /* time */
+     8	#include <math.h>
+     9	#include <glad/glad.h>
+    10	#include <GLFW/glfw3.h>
+    11	#define GLM_FORCE_RADIANS
+    12	#include <glm/glm.hpp>
+    13	#include <glm/gtx/transform.hpp>
+    14	#include <glm/gtc/matrix_transform.hpp>
+    15	#include <FTGL/ftgl.h>
+    16	using namespace std;
+    17	
+    18	struct VAO {
+    19	  GLuint VertexArrayID;
+    20	  GLuint VertexBuffer;
+    21	  GLuint ColorBuffer;
+    22	
+    23	  GLenum PrimitiveMode;
+    24	  GLenum FillMode;
+    25	  int NumVertices;
+    26	};
+    27	typedef struct VAO VAO;
+    28	
+    29	struct GLMatrices {
+    30	  glm::mat4 projection;
+    31	  glm::mat4 model;
+    32	  glm::mat4 view;
+    33	  GLuint MatrixID;
+    34	} Matrices;
+    35	
+    36	GLuint programID;
+    37	
+    38	/* Function to load Shaders - Use it as it is */
+    39	GLuint LoadShaders(const char * vertex_file_path,const char * fragment_file_path) {
+    40	
+    41	  // Create the shaders
+    42	  GLuint VertexShaderID = glCreateShader(GL_VERTEX_SHADER);
+    43	  GLuint FragmentShaderID = glCreateShader(GL_FRAGMENT_SHADER);
+    44	
+    45	  // Read the Vertex Shader code from the file
+    46	  std::string VertexShaderCode;
+    47	  std::ifstream VertexShaderStream(vertex_file_path, std::ios::in);
+    48	  if(VertexShaderStream.is_open())
+    49	    {
+    50	      std::string Line = "";
+    51	      while(getline(VertexShaderStream, Line))
+    52		VertexShaderCode += "\n" + Line;
+    53	      VertexShaderStream.close();
+    54	    }
+    55	
+    56	  // Read the Fragment Shader code from the file
+    57	  std::string FragmentShaderCode;
+    58	  std::ifstream FragmentShaderStream(fragment_file_path, std::ios::in);
+    59	  if(FragmentShaderStream.is_open()){
+    60	    std::string Line = "";
+    61	    while(getline(FragmentShaderStream, Line))
+    62	      FragmentShaderCode += "\n" + Line;
+    63	    FragmentShaderStream.close();
+    64	  }
+    65	
+    66	  GLint Result = GL_FALSE;
+    67	  int InfoLogLength;
+    68	
+    69	  // Compile Vertex Shader
+    70	  printf("Compiling shader : %s\n", vertex_file_path);
+    71	  char const * VertexSourcePointer = VertexShaderCode.c_str();
+    72	  glShaderSource(VertexShaderID, 1, &VertexSourcePointer , NULL);
+    73	  glCompileShader(VertexShaderID);
+    74	
+    75	  // Check Vertex Shader
+    76	  glGetShaderiv(VertexShaderID, GL_COMPILE_STATUS, &Result);
+    77	  glGetShaderiv(VertexShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
+    78	  std::vector<char> VertexShaderErrorMessage(InfoLogLength);
+    79	  glGetShaderInfoLog(VertexShaderID, InfoLogLength, NULL, &VertexShaderErrorMessage[0]);
+    80	  fprintf(stdout, "%s\n", &VertexShaderErrorMessage[0]);
+    81	
+    82	  // Compile Fragment Shader
+    83	  printf("Compiling shader : %s\n", fragment_file_path);
+    84	  char const * FragmentSourcePointer = FragmentShaderCode.c_str();
+    85	  glShaderSource(FragmentShaderID, 1, &FragmentSourcePointer , NULL);
+    86	  glCompileShader(FragmentShaderID);
+    87	
+    88	  // Check Fragment Shader
+    89	  glGetShaderiv(FragmentShaderID, GL_COMPILE_STATUS, &Result);
+    90	  glGetShaderiv(FragmentShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
+    91	  std::vector<char> FragmentShaderErrorMessage(InfoLogLength);
+    92	  glGetShaderInfoLog(FragmentShaderID, InfoLogLength, NULL, &FragmentShaderErrorMessage[0]);
+    93	  fprintf(stdout, "%s\n", &FragmentShaderErrorMessage[0]);
+    94	
+    95	  // Link the program
+    96	  fprintf(stdout, "Linking program\n");
+    97	  GLuint ProgramID = glCreateProgram();
+    98	  glAttachShader(ProgramID, VertexShaderID);
+    99	  glAttachShader(ProgramID, FragmentShaderID);
+   100	  glLinkProgram(ProgramID);
+   101	
+   102	  // Check the program
+   103	  glGetProgramiv(ProgramID, GL_LINK_STATUS, &Result);
+   104	  glGetProgramiv(ProgramID, GL_INFO_LOG_LENGTH, &InfoLogLength);
+   105	  std::vector<char> ProgramErrorMessage( max(InfoLogLength, int(1)) );
+   106	  glGetProgramInfoLog(ProgramID, InfoLogLength, NULL, &ProgramErrorMessage[0]);
+   107	  fprintf(stdout, "%s\n", &ProgramErrorMessage[0]);
+   108	
+   109	  glDeleteShader(VertexShaderID);
+   110	  glDeleteShader(FragmentShaderID);
+   111	
+   112	  return ProgramID;
+   113	}
+   114	
+   115	static void error_callback(int error, const char* description)
+   116	{
+   117	  fprintf(stderr, "Error: %s\n", description);
+   118	}
+   119	
+   120	void quit(GLFWwindow *window)
+   121	{
+   122	  glfwDestroyWindow(window);
+   123	  glfwTerminate();
+   124	  //    exit(EXIT_SUCCESS);
+   125	}
+   126	
+   127	float gen_point()
+   128	{
+   129	  int r=rand()%700-350;
+   130	  float x=r/100.0;
+   131	  return x;
+   132	}
+   133	
+   134	
+   135	/* Generate VAO, VBOs and return VAO handle */
+   136	struct VAO* create3DObject (GLenum primitive_mode, int numVertices, const GLfloat* vertex_buffer_data, const GLfloat* color_buffer_data, GLenum fill_mode=GL_FILL)
+   137	{
+   138	  struct VAO* vao = new struct VAO;
+   139	  vao->PrimitiveMode = primitive_mode;
+   140	  vao->NumVertices = numVertices;
+   141	  vao->FillMode = fill_mode;
+   142	
+   143	  // Create Vertex Array Object
+   144	  // Should be done after CreateWindow and before any other GL calls
+   145	  glGenVertexArrays(1, &(vao->VertexArrayID)); // VAO
+   146	  glGenBuffers (1, &(vao->VertexBuffer)); // VBO - vertices
+   147	  glGenBuffers (1, &(vao->ColorBuffer));  // VBO - colors
+   148	
+   149	  glBindVertexArray (vao->VertexArrayID); // Bind the VAO 
+   150	  glBindBuffer (GL_ARRAY_BUFFER, vao->VertexBuffer); // Bind the VBO vertices 
+   151	  glBufferData (GL_ARRAY_BUFFER, 3*numVertices*sizeof(GLfloat), vertex_buffer_data, GL_STATIC_DRAW); // Copy the vertices into VBO
+   152	  glVertexAttribPointer(
+   153				0,                  // attribute 0. Vertices
+   154				3,                  // size (x,y,z)
+   155				GL_FLOAT,           // type
+   156				GL_FALSE,           // normalized?
+   157				0,                  // stride
+   158				(void*)0            // array buffer offset
+   159				);
+   160	
+   161	  glBindBuffer (GL_ARRAY_BUFFER, vao->ColorBuffer); // Bind the VBO colors 
+   162	  glBufferData (GL_ARRAY_BUFFER, 3*numVertices*sizeof(GLfloat), color_buffer_data, GL_STATIC_DRAW);  // Copy the vertex colors
+   163	  glVertexAttribPointer(
+   164				1,                  // attribute 1. Color
+   165				3,                  // size (r,g,b)
+   166				GL_FLOAT,           // type
+   167				GL_FALSE,           // normalized?
+   168				0,                  // stride
+   169				(void*)0            // array buffer offset
+   170				);
+   171	
+   172	  return vao;
+   173	}
+   174	
+   175	/* Generate VAO, VBOs and return VAO handle - Common Color for all vertices */
+   176	struct VAO* create3DObject (GLenum primitive_mode, int numVertices, const GLfloat* vertex_buffer_data, const GLfloat red, const GLfloat green, const GLfloat blue, GLenum fill_mode=GL_FILL)
+   177	{
+   178	  GLfloat* color_buffer_data = new GLfloat [3*numVertices];
+   179	  for (int i=0; i<numVertices; i++) {
+   180	    color_buffer_data [3*i] = red;
+   181	    color_buffer_data [3*i + 1] = green;
+   182	    color_buffer_data [3*i + 2] = blue;
+   183	  }
+   184	
+   185	  return create3DObject(primitive_mode, numVertices, vertex_buffer_data, color_buffer_data, fill_mode);
+   186	}
+   187	
+   188	/* Render the VBOs handled by VAO */
+   189	void draw3DObject (struct VAO* vao)
+   190	{
+   191	  // Change the Fill Mode for this object
+   192	  glPolygonMode (GL_FRONT_AND_BACK, vao->FillMode);
+   193	
+   194	  // Bind the VAO to use
+   195	  glBindVertexArray (vao->VertexArrayID);
+   196	
+   197	  // Enable Vertex Attribute 0 - 3d Vertices
+   198	  glEnableVertexAttribArray(0);
+   199	  // Bind the VBO to use
+   200	  glBindBuffer(GL_ARRAY_BUFFER, vao->VertexBuffer);
+   201	
+   202	  // Enable Vertex Attribute 1 - Color
+   203	  glEnableVertexAttribArray(1);
+   204	  // Bind the VBO to use
+   205	  glBindBuffer(GL_ARRAY_BUFFER, vao->ColorBuffer);
+   206	
+   207	  // Draw the geometry !
+   208	  glDrawArrays(vao->PrimitiveMode, 0, vao->NumVertices); // Starting from vertex 0; 3 vertices total -> 1 triangle
+   209	}
+   210	
+   211	/**************************
+   212	 * Customizable functions *
+   213	 **************************/
+   214	
+   215	float cannonPos=0,cannonAngle=0;
+   216	
+   217	/* Executed when a regular key is pressed/released/held-down */
+   218	/* Prefered for Keyboard events */
+   219	
+   220	
+   221	/* Executed when a mouse button is pressed/released */
+   222	void mouseButton (GLFWwindow* window, int button, int action, int mods)
+   223	{
+   224	  switch (button) {
+   225	  case GLFW_MOUSE_BUTTON_LEFT:
+   226	    if (action == GLFW_RELEASE)
+   227	
+   228	      break;
+   229	  case GLFW_MOUSE_BUTTON_RIGHT:
+   230	    if (action == GLFW_RELEASE) {
+   231	
+   232	    }
+   233	    break;
+   234	  default:
+   235	    break;
+   236	  }
+   237	}
+   238	
+   239	
+   240	/* Executed when window is resized to 'width' and 'height' */
+   241	/* Modify the bounds of the screen here in glm::ortho or Field of View in glm::Perspective */
+   242	
+   243	void reshapeWindow (GLFWwindow* window, int width, int height)
+   244	{
+   245	  int fbwidth=width, fbheight=height;
+   246	  /* With Retina display on Mac OS X, GLFW's FramebufferSize
+   247	     is different from WindowSize */
+   248	  glfwGetFramebufferSize(window, &fbwidth, &fbheight);
+   249	
+   250	  GLfloat fov = 90.0f;
+   251	
+   252	  // sets the viewport of openGL renderer
+   253	  glViewport (0, 0, (GLsizei) fbwidth, (GLsizei) fbheight);
+   254	
+   255	  // set the projection matrix as perspective
+   256	  /* glMatrixMode (GL_PROJECTION);
+   257	     glLoadIdentity ();
+   258	     gluPerspective (fov, (GLfloat) fbwidth / (GLfloat) fbheight, 0.1, 500.0); */
+   259	  // Store the projection matrix in a variable for future use
+   260	  // Perspective projection for 3D views
+   261	  // Matrices.projection = glm::perspective (fov, (GLfloat) fbwidth / (GLfloat) fbheight, 0.1f, 500.0f);
+   262	
+   263	  // Ortho projection for 2D views
+   264	  Matrices.projection = glm::ortho(-4.0f, 4.0f, -4.0f, 4.0f, 0.1f, 500.0f);
+   265	}
+   266	float ab(float x)
+   267	{
+   268	  float r=x;
+   269	  if(r<0)r*=-1;
+   270	  return r;
+   271	}
+   272	VAO *brick,*laser,*mirror,*cannon,*blue,*green;
+   273	
+   274	GLfloat bricks [100000]={0},colbricks[100000]={0},Laser[20]={0},colLaser[20]={0},Mirror[100],colMirror[100]={0},bluePos=0,greenPos=0;
+   275	int numBricks=0,numMirrors,score=0,Over=0;
+   276	double fall=0,speed=0.0001,angles[10];
+   277	void createMirrors()
+   278	{
+   279	  int i,N,angle;
+   280	  float A;
+   281	  numMirrors=rand()%4+1;
+   282	  for(i=0;i<numMirrors;i++)
+   283	    {
+   284	 
+   285	      angle=rand()%45+45;
+   286	      
+   287	
+   288	
+   289	      angles[i]=angle;
+   290	      A=angle;
+   291	      A=tan(A/180*M_PI);
+   292	      N=i*6;
+   293	      Mirror[N]=Mirror[N+3]=gen_point();
+   294	      Mirror[N+1]=Mirror[N+4]=gen_point();
+   295	      
+   296	      while(ab(Mirror[N]-Mirror[N+3])<=1&&ab(Mirror[N+1]-Mirror[N+4])<=1)
+   297		{
+   298		  Mirror[N+3]+=0.01;
+   299		  Mirror[N+4]+=A*0.01;
+   300	
+   301		}
+   302	
+   303	
+   304	
+   305	    }
+   306	  mirror= create3DObject(GL_LINES,6*numMirrors,Mirror, colMirror, GL_FILL);
+   307	
+   308	  }
+   309	void createLaser()
+   310	{
+   311	  Laser[0]=-4,Laser[1]=cannonPos;
+   312	  float i=-4,j=cannonPos,M,C,angle,dif;
+   313	  int flag=1,n,f,k,dir=1,N,LaserN=0;
+   314	  angle=cannonAngle;
+   315	  while(i<=4&&j<=4&&j>=-4&&i>=-4)
+   316	    {
+   317	
+   318	      i+=speed*10*dir;
+   319	      j+=(speed*10*tan(angle/180*M_PI)*dir);
+   320	      for(k=0;k<numMirrors;k++)
+   321		{
+   322		  M=tan(angles[k]/180*M_PI);
+   323		  N=k*6;
+   324		  C=Mirror[N+1]-M*Mirror[N];
+   325		  if(ab(j-M*i-C)<=0.01&&i>=Mirror[N]&&i<=Mirror[N+3]&&dir==1)
+   326		    {
+   327		      dir*=-1;
+   328		      Laser[LaserN*6+3]=i,Laser[LaserN*6+4]=j;
+   329		      LaserN++;
+   330		      Laser[LaserN*6]=i;
+   331		      Laser[LaserN*6+1]=j;
+   332		      dif=90-ab(angles[k]);
+   333		      angle+=dif;
+   334		      angle*=-1;
+   335		      angle-=dif;
+   336		      break;
+   337		    }
+   338		  
+   339		  
+   340		    }
+   341	      for(f=0;f<numBricks;f++)
+   342		{
+   343		  n=18*f;
+   344		  if(i>=bricks[n]&&i<=bricks[n]+0.1&&j<=bricks[n+1]-fall&&j>=bricks[n+1]-0.2-fall)
+   345		    {
+   346		      for( k=0;k<18;k++)
+   347			bricks[n+k]=0;
+   348		      score+=speed/0.0001;
+   349		      
+   350		      brick = create3DObject(GL_TRIANGLES,numBricks*6, bricks, colbricks, GL_FILL);
+   351	
+   352		      flag=0;break;
+   353		    }
+   354		}
+   355	      if(!flag)break;
+   356	    }
+   357	  Laser[(LaserN*6)+3]=i,Laser[(LaserN*6)+4]=j;
+   358	  laser = create3DObject(GL_LINES,20, Laser, colLaser, GL_FILL);
+   359	  
+   360	}
+   361	
+   362	void createBrick(float x)
+   363	{
+   364	  // GL3 accepts only Triangles. Quads are not supported
+   365	
+   366	 
+   367	  GLfloat vertex[] = {
+   368	    x,4+fall,0, // vertex 1
+   369	    x+0.1,4+fall,0, // vertex 2
+   370	    x+0.1, 3.9+fall,0, // vertex 3
+   371	
+   372	    x+0.1, 3.9+fall,0, // vertex 3
+   373	    x, 3.9+fall,0, // vertex 4
+   374	    x,4+fall,0  // vertex 1
+   375	  };
+   376	  int s=numBricks*18;
+   377	  int i;
+   378	  for(i=0;i<18;i++)
+   379	    bricks[s+i]=vertex[i];
+   380	  
+   381	 
+   382	  numBricks++;
+   383	  int r=rand()%3;
+   384	  if(r)
+   385	    {
+   386	      for (i=0;i<6;i++)
+   387		colbricks[s+i*3+r]=1;
+   388	    }
+   389	 
+   390	
+   391	  // create3DObject creates and returns a handle to a VAO that can be used later
+   392	  //rectangle = create3DObject(GL_LINES, 6, vertex_buffer_data, color_buffer_data, GL_FILL);
+   393	  brick = create3DObject(GL_TRIANGLES,numBricks*6, bricks, colbricks, GL_FILL);
+   394	}
+   395	
+   396	void checkBlue()
+   397	{
+   398	  int i,N;
+   399	  for(i=0;i<numBricks;i++)
+   400	    {
+   401	      N=i*18;
+   402	      if(!colbricks[N+1]&&!colbricks[N+2])
+   403		if(bricks[N+1]-0.1-fall<=-3.6&&bricks[N]>=2.4+greenPos&&bricks[N]<=3+bluePos);//Over=1;
+   404	      if(!colbricks[N+2])
+   405		continue;
+   406	      if(bricks[N+1]-0.1-fall<=-3.6&&bricks[N]>=-3+bluePos&&bricks[N]<=-2.4+bluePos)
+   407		{
+   408		   for( int k=0;k<18;k++)
+   409			bricks[N+k]=0;
+   410		       score+=speed/0.0001;
+   411		      brick = create3DObject(GL_TRIANGLES,numBricks*6, bricks, colbricks, GL_FILL);
+   412		}
+   413	    }
+   414	}
+   415	
+   416	
+   417	void checkGreen()
+   418	{
+   419	  int i,N;
+   420	  for(i=0;i<numBricks;i++)
+   421	    {
+   422	      N=i*18;
+   423	      if(!colbricks[N+1]&&!colbricks[N+2])
+   424		if(bricks[N+1]-0.1-fall<=-3.6&&bricks[N]>=2.4+greenPos&&bricks[N]<=3+greenPos);//Over=1;
+   425	      if(!colbricks[N+1])
+   426		continue;
+   427	      if(bricks[N+1]-0.1-fall<=-3.6&&bricks[N]>=2.4+greenPos&&bricks[N]<=3+greenPos)
+   428		{
+   429		   for( int k=0;k<18;k++)
+   430			bricks[N+k]=0;
+   431		    score+=speed/0.0001;
+   432		      
+   433		      brick = create3DObject(GL_TRIANGLES,numBricks*6, bricks, colbricks, GL_FILL);
+   434		}
+   435	    }
+   436	}
+   437	
+   438	void createCannon()
+   439	{
+   440	 GLfloat vertex[] = {
+   441	    -4,0,0, // vertex 1
+   442	    -3.7,0,0, // vertex 2
+   443	    -3.7, -0.1,0, // vertex 3
+   444	
+   445	   -3.7, -0.1,0, // vertex 3
+   446	    -4, -0.1,0, // vertex 4
+   447	    -4,0,0  // vertex 1
+   448	  };
+   449	
+   450	  cannon = create3DObject(GL_TRIANGLES,6, vertex, colLaser, GL_LINES);
+   451	  
+   452	}
+   453	
+   454	void createBuckets()
+   455	{
+   456	  
+   457	 GLfloat vertex[] = {
+   458	    -3,-3.6,0, // vertex 1
+   459	    -2.4,-3.6,0, // vertex 2
+   460	    -2.6, -3.9,0, // vertex 3
+   461	
+   462	    -2.6, -3.9,0, // vertex 3
+   463	    -2.8, -3.9,0, // vertex 4
+   464	     -3,-3.6,0,  // vertex 1
+   465	  };
+   466	
+   467	 GLfloat col[18]={0};
+   468	 int i;
+   469	 for(i=0;i<6;i++)
+   470	   col[i*3+2]=1;
+   471	  blue = create3DObject(GL_TRIANGLES,6, vertex, col, GL_LINES);
+   472	
+   473	   GLfloat vertex2[] = {
+   474	    3,-3.6,0, // vertex 1
+   475	    2.4,-3.6,0, // vertex 2
+   476	    2.6, -3.9,0, // vertex 3
+   477	
+   478	    2.6, -3.9,0, // vertex 3
+   479	    2.8, -3.9,0, // vertex 4
+   480	     3,-3.6,0,  // vertex 1
+   481	  };
+   482	
+   483	   GLfloat col2[18]={0};
+   484	
+   485	 for(i=0;i<6;i++)
+   486	   col2[i*3+1]=1;
+   487	  green = create3DObject(GL_TRIANGLES,6, vertex2, col2, GL_LINES);
+   488	  
+   489	}
+   490	double last_update_time1;
+   491	
+   492	void keyboard (GLFWwindow* window, int key, int scancode, int action, int mods)
+   493	{
+   494	  // Function is called first on GLFW_PRESS.
+   495	
+   496	  if (action == GLFW_RELEASE) {
+   497	    switch (key) {
+   498	    case GLFW_KEY_C:
+   499	              
+   500	      break;
+   501	    case GLFW_KEY_P:
+   502	
+   503	      break;
+   504	   
+   505	    case GLFW_KEY_RIGHT:
+   506	    {
+   507	      if((glfwGetKey(window,GLFW_KEY_RIGHT_ALT)||glfwGetKey(window,GLFW_KEY_LEFT_ALT))&&bluePos<=6.1)
+   508		bluePos+=0.1;
+   509	
+   510	       if((glfwGetKey(window,GLFW_KEY_RIGHT_CONTROL)||glfwGetKey(window,GLFW_KEY_LEFT_CONTROL))&&greenPos<1)
+   511		greenPos+=0.1;
+   512	
+   513	      break;
+   514	    }
+   515	
+   516	     case GLFW_KEY_LEFT:
+   517	    {
+   518	      if((glfwGetKey(window,GLFW_KEY_RIGHT_ALT)||glfwGetKey(window,GLFW_KEY_LEFT_ALT))&&bluePos>=-1)
+   519		bluePos-=0.1;
+   520	
+   521	       if((glfwGetKey(window,GLFW_KEY_RIGHT_CONTROL)||glfwGetKey(window,GLFW_KEY_LEFT_CONTROL))&&greenPos>=-6.1)
+   522		greenPos-=0.1;
+   523	      
+   524	
+   525	
+   526	
+   527	      break;
+   528	    }
+   529	    default:
+   530	      break;
+   531	    }
+   532	  }
+   533	  else if (action == GLFW_PRESS) {
+   534	    switch (key) {
+   535	    case GLFW_KEY_ESCAPE:
+   536	      quit(window);
+   537	      break;
+   538	    default:
+   539	      break;
+   540	    }
+   541	  }
+   542	}
+   543	
+   544	/* Executed for character input (like in text boxes) */
+   545	void keyboardChar (GLFWwindow* window, unsigned int key)
+   546	{
+   547	  switch (key) {
+   548	  case 'Q':
+   549	  case 'q':
+   550	    quit(window);
+   551	    break;
+   552		    
+   553	  case 's':
+   554	  case 'S':
+   555	    cannonPos+=0.05;
+   556	    break;
+   557	
+   558	  case 'f':
+   559	  case 'F':
+   560	    cannonPos-=0.05;
+   561	    break;
+   562	
+   563	  case 'a':
+   564	  case 'A':
+   565	    cannonAngle+=0.1;
+   566	    break;
+   567			  
+   568	  case 'd':
+   569	  case 'D':
+   570	    cannonAngle-=0.1;
+   571	    break;
+   572	
+   573	
+   574	  case 'x':
+   575	  case 'X':
+   576	    {
+   577	      if(glfwGetTime()-last_update_time1>=1)
+   578		{
+   579		  createLaser();
+   580		  last_update_time1 = glfwGetTime();
+   581		}
+   582	      
+   583	      break;
+   584	    }
+   585	       case 'n':
+   586	  case 'N':
+   587	    {
+   588	      float s=speed/0.0001;
+   589	      if(s>1)s--;
+   590	      speed=s*0.0001;
+   591	      
+   592	      break;
+   593	    }
+   594	
+   595	    
+   596	       case 'm':
+   597	  case 'M':
+   598	    {
+   599	      float s=speed/0.0001;
+   600	      if(s<5)s++;
+   601	      speed=s*0.0001;
+   602	      
+   603	      break;
+   604	    }
+   605	
+   606	
+   607	
+   608	    
+   609	  default:
+   610	    break;
+   611	  }
+   612	}
+   613	
+   614	float camera_rotation_angle = 90;
+   615	
+   616	/* Render the scene with openGL */
+   617	/* Edit this function according to your assignment */
+   618	void draw ()
+   619	{
+   620	  // clear the color and depth in the frame buffer
+   621	  glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+   622	
+   623	  // use the loaded shader program
+   624	  // Don't change unless you know what you are doing
+   625	  glUseProgram (programID);
+   626	
+   627	  // Eye - Location of camera. Don't change unless you are sure!!
+   628	  glm::vec3 eye ( 5*cos(camera_rotation_angle*M_PI/180.0f), 0, 5*sin(camera_rotation_angle*M_PI/180.0f) );
+   629	  // Target - Where is the camera looking at.  Don't change unless you are sure!!
+   630	  glm::vec3 target (0, 0, 0);
+   631	  // Up - Up vector defines tilt of camera.  Don't change unless you are sure!!
+   632	  glm::vec3 up (0, 1, 0);
+   633	
+   634	  // Compute Camera matrix (view)
+   635	  // Matrices.view = glm::lookAt( eye, target, up ); // Rotating Camera for 3D
+   636	  //  Don't change unless you are sure!!
+   637	  Matrices.view = glm::lookAt(glm::vec3(0,0,3), glm::vec3(0,0,0), glm::vec3(0,1,0)); // Fixed camera for 2D (ortho) in XY plane
+   638	
+   639	  // Compute ViewProject matrix as view/camera might not be changed for this frame (basic scenario)
+   640	  //  Don't change unless you are sure!!
+   641	  glm::mat4 VP = Matrices.projection * Matrices.view;
+   642	
+   643	  // Send our transformation to the currently bound shader, in the "MVP" uniform
+   644	  // For each model you render, since the MVP will be different (at least the M part)
+   645	  //  Don't change unless you are sure!!
+   646	  glm::mat4 MVP;	// MVP = Projection * View * Model
+   647	
+   648	
+   649	 Matrices.model = glm::mat4(1.0f);
+   650	 
+   651	
+   652	 glm::mat4 translateB = glm::translate (glm::vec3(bluePos, 0, 0));        // glTranslatef
+   653	  //glm::mat4 rotateRectangle = glm::rotate((float)(-rectangle_rotation*M_PI/18000.0f), glm::vec3(0,0,1)); // rotate about vector (-1,1,1)
+   654	  Matrices.model *= (translateB );
+   655	  MVP = VP * Matrices.model;
+   656	  glUniformMatrix4fv(Matrices.MatrixID, 1, GL_FALSE, &MVP[0][0]);
+   657	
+   658	  // draw3DObject draws the VAO given to it using current MVP matrix
+   659	  draw3DObject(blue);
+   660	
+   661	 Matrices.model = glm::mat4(1.0f);
+   662	 
+   663	
+   664	 glm::mat4 translateG = glm::translate (glm::vec3(greenPos, 0, 0));        // glTranslatef
+   665	  //glm::mat4 rotateRectangle = glm::rotate((float)(-rectangle_rotation*M_PI/18000.0f), glm::vec3(0,0,1)); // rotate about vector (-1,1,1)
+   666	  Matrices.model *= (translateG );
+   667	  MVP = VP * Matrices.model;
+   668	  glUniformMatrix4fv(Matrices.MatrixID, 1, GL_FALSE, &MVP[0][0]);
+   669	
+   670	  // draw3DObject draws the VAO given to it using current MVP matrix
+   671	  draw3DObject(green);
+   672	  
+   673	  // Load identity to model matrix
+   674	  Matrices.model = glm::mat4(1.0f);
+   675	 
+   676	
+   677	  glm::mat4 translateRectangle = glm::translate (glm::vec3(0, -fall, 0));        // glTranslatef
+   678	  //glm::mat4 rotateRectangle = glm::rotate((float)(-rectangle_rotation*M_PI/18000.0f), glm::vec3(0,0,1)); // rotate about vector (-1,1,1)
+   679	  Matrices.model *= (translateRectangle );
+   680	  MVP = VP * Matrices.model;
+   681	  glUniformMatrix4fv(Matrices.MatrixID, 1, GL_FALSE, &MVP[0][0]);
+   682	
+   683	  // draw3DObject draws the VAO given to it using current MVP matrix
+   684	  draw3DObject(brick);
+   685	
+   686	  
+   687	
+   688	  Matrices.model = glm::mat4(1.0f);
+   689	
+   690	  MVP = VP * Matrices.model;
+   691	  glUniformMatrix4fv(Matrices.MatrixID, 1, GL_FALSE, &MVP[0][0]);
+   692	
+   693	  // draw3DObject draws the VAO given to it using current MVP matrix
+   694	  if(laser)
+   695	    draw3DObject(laser);
+   696	
+   697	  
+   698	  Matrices.model = glm::mat4(1.0f);
+   699	
+   700	  MVP = VP * Matrices.model;
+   701	  glUniformMatrix4fv(Matrices.MatrixID, 1, GL_FALSE, &MVP[0][0]);
+   702	
+   703	  // draw3DObject draws the VAO given to it using current MVP matrix
+   704	 
+   705	  draw3DObject(mirror);
+   706	
+   707	  Matrices.model = glm::mat4(1.0f);
+   708	 
+   709	
+   710	  glm::mat4 translateRectangle1 = glm::translate (glm::vec3(0, cannonPos, 0));        // glTranslatef
+   711	  
+   712	    glm::mat4 rotateRectangle = glm::rotate((float)(cannonAngle*M_PI), glm::vec3(0,0,1)); // rotate about vector (-1,1,1)
+   713	  Matrices.model *= (translateRectangle1*rotateRectangle);
+   714	  MVP = VP * Matrices.model;
+   715	  glUniformMatrix4fv(Matrices.MatrixID, 1, GL_FALSE, &MVP[0][0]);
+   716	
+   717	  // draw3DObject draws the VAO given to it using current MVP matrix
+   718	  draw3DObject(cannon);
+   719	
+   720	  // Increment angles
+   721	  float increments = 1;
+   722	
+   723	}
+   724	
+   725	/* Initialise glfw window, I/O callbacks and the renderer to use */
+   726	/* Nothing to Edit here */
+   727	GLFWwindow* initGLFW (int width, int height)
+   728	{
+   729	  GLFWwindow* window; // window desciptor/handle
+   730	
+   731	  glfwSetErrorCallback(error_callback);
+   732	  if (!glfwInit()) {
+   733	    //        exit(EXIT_FAILURE);
+   734	  }
+   735	
+   736	  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+   737	  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+   738	  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+   739	  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+   740	
+   741	  window = glfwCreateWindow(width, height, "Sample OpenGL 3.3 Application", NULL, NULL);
+   742	
+   743	  if (!window) {
+   744	    glfwTerminate();
+   745	    //        exit(EXIT_FAILURE);
+   746	  }
+   747	
+   748	  glfwMakeContextCurrent(window);
+   749	  gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
+   750	  glfwSwapInterval( 1 );
+   751	
+   752	  /* --- register callbacks with GLFW --- */
+   753	
+   754	  /* Register function to handle window resizes */
+   755	  /* With Retina display on Mac OS X GLFW's FramebufferSize
+   756	     is different from WindowSize */
+   757	  glfwSetFramebufferSizeCallback(window, reshapeWindow);
+   758	  glfwSetWindowSizeCallback(window, reshapeWindow);
+   759	
+   760	  /* Register function to handle window close */
+   761	  glfwSetWindowCloseCallback(window, quit);
+   762	
+   763	  /* Register function to handle keyboard input */
+   764	  glfwSetKeyCallback(window, keyboard);      // general keyboard input
+   765	  glfwSetCharCallback(window, keyboardChar);  // simpler specific character handling
+   766	
+   767	  /* Register function to handle mouse click */
+   768	  glfwSetMouseButtonCallback(window, mouseButton);  // mouse button clicks
+   769	
+   770	  return window;
+   771	}
+   772	
+   773	/* Initialize the OpenGL rendering properties */
+   774	/* Add all the models to be created here */
+   775	void initGL (GLFWwindow* window, int width, int height)
+   776	{
+   777	  /* Objects should be created before any other gl function and shaders */
+   778	  // Create the models
+   779	  createBrick(gen_point());
+   780	  createMirrors();
+   781	  createCannon();
+   782	  createBuckets();
+   783	
+   784	  // Create and compile our GLSL program from the shaders
+   785	  programID = LoadShaders( "Sample_GL.vert", "Sample_GL.frag" );
+   786	  // Get a handle for our "MVP" uniform
+   787	  Matrices.MatrixID = glGetUniformLocation(programID, "MVP");
+   788	
+   789		
+   790	  reshapeWindow (window, width, height);
+   791	
+   792	  // Background color of the scene
+   793	  glClearColor (1, 1, 1, 0.0f); // R, G, B, A
+   794	  glClearDepth (1.0f);
+   795	
+   796	  glEnable (GL_DEPTH_TEST);
+   797	  glDepthFunc (GL_LEQUAL);
+   798	
+   799	  cout << "VENDOR: " << glGetString(GL_VENDOR) << endl;
+   800	  cout << "RENDERER: " << glGetString(GL_RENDERER) << endl;
+   801	  cout << "VERSION: " << glGetString(GL_VERSION) << endl;
+   802	  cout << "GLSL: " << glGetString(GL_SHADING_LANGUAGE_VERSION) << endl;
+   803	}
+   804	
+   805	int main (int argc, char** argv)
+   806	{
+   807	 
+   808	  int width = 1000;
+   809	  int height = 1000;
+   810	  srand (time(NULL));
+   811	  last_update_time1 = glfwGetTime();
+   812	  GLFWwindow* window = initGLFW(width, height);
+   813	
+   814	  initGL (window, width, height);
+   815	  //createMirrors();
+   816	  double last_update_time = glfwGetTime(), current_time, current_time1;
+   817	
+   818	  /* Draw in loop */
+   819	  while (!glfwWindowShouldClose(window)&&!Over) {
+   820	
+   821	    // OpenGL Draw commands
+   822	  
+   823	
+   824	    //createBrick(gen_point());
+   825	
+   826	    // Swap Frame Buffer in double buffering
+   827	    glfwSwapBuffers(window);
+   828	
+   829	    // Poll for Keyboard and mouse events
+   830	    glfwPollEvents();
+   831	
+   832	    // Control based on time (Time based transformation like 5 degrees rotation every 0.5s)
+   833	    current_time = glfwGetTime(); // Time in seconds
+   834	    if ((current_time - last_update_time) >= 1)  // atleast 0.5s elapsed since last frame
+   835	      // do something every 0.5 seconds ..
+   836	      {
+   837		last_update_time = current_time;
+   838		createBrick(gen_point());
+   839	
+   840	      }
+   841	
+   842		
+   843	    current_time1 = glfwGetTime(); // Time in seconds
+   844	    if ((current_time1 - last_update_time1) >= 0.2&&Laser[0])  // atleast 0.5s elapsed since last frame
+   845	      // do something every 0.5 seconds ..
+   846	      {
+   847		last_update_time1 = current_time1;
+   848	
+   849		for(int k=0;k<20;k++)Laser[k]=0;
+   850		laser = create3DObject(GL_LINES,20, Laser, colLaser, GL_FILL);
+   851	      }
+   852	
+   853	    fall+=speed;
+   854	    checkBlue();checkGreen();
+   855	    draw();
+   856	
+   857	    
+   858	  }
+   859	    
+   860	
+   861	         
+   862	
+   863	  glfwTerminate();
+   864	  //    exit(EXIT_SUCCESS);
+   865	}
